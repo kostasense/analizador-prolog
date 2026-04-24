@@ -66,6 +66,17 @@ type(Atom, cadena):-
     atom_codes(Atom, [34 | Rest]),
     last(Rest, 34).
 
+% -------------------------------------------- helpers --------------------------------------------
+%   check if given code belongs to a digit
+is_digit(D):- D >= 48, D =< 57.
+
+%   check if given code belongs to a letter
+is_alpha(D):- D >= 65, D =< 90.
+is_alpha(D):- D >= 97, D =< 122.
+
+is_alnum(D):- is_digit(D) ; is_alpha(D).
+
+% -------------------------------------------- tokenizer --------------------------------------------
 %!  identifier(+Atom)
 %   true when Atom is a valid identifier:
 %   starts with a letter or underscore, rest are letters, digits, or underscores.
@@ -74,10 +85,10 @@ identifier(Atom):-
     identifierStart(First),
     maplist(identifierContent, Rest).
 
-identifierStart(Code):- code_type(Code, alpha).   % a-z, A-Z
-identifierStart(95).                              % underscore _
+identifierStart(Code):- is_alpha(Code).         % a-z, A-Z
+identifierStart(95).                            % underscore _
 
-identifierContent(Code):- code_type(Code, alnum). % a-z, A-Z, 0-9
+identifierContent(Code):- is_alnum(Code).       % a-z, A-Z, 0-9
 identifierContent(95).  
 
 %!  tokenize(+String, -Tokens)
@@ -220,8 +231,8 @@ build([H | T], [], [H | T]):-  % special char
 build([H | T], [H | WordTail], Remainder):-
     build(T, WordTail, Remainder).
 
-
-%   dcg rules for numbers
+%   -------------------------------------------- dgc rules --------------------------------------------
+%   dcg rules for integers and floats
 build_integer(I) -->
         digit_(D0),
         digits_(D),
@@ -232,10 +243,10 @@ build_float(F) -->
     digits_(D0), 
     [0'.], 
     digits_(D1), 
-    { D0 \\= [], 
-    D1 \\= [],
-    append(D0, [0'.|D1], Codes), 
-    number_codes(F, Codes) 
+    { D0 \= [], 
+      D1 \= [],
+      append(D0, [0'.|D1], Codes), 
+      number_codes(F, Codes) 
     }.
 
 digits_([D|T]) -->
@@ -246,6 +257,6 @@ digits_([]) -->
 
 digit_(D) -->
         [D],
-        { code_type(D, digit)
+        { is_digit(D)
         }.
 `;
