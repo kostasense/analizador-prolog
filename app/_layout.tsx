@@ -1,5 +1,5 @@
-import { lexer } from "@/src/prolog/pl/lexer";
-import { router, Slot } from "expo-router";
+import { Slot } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -9,6 +9,9 @@ import {
   View,
 } from "react-native";
 import { prologEngine } from "../src/prolog/PrologEngine";
+import { lexer } from "../src/prolog/pl/lexer";
+
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [prologReady, setPrologReady] = useState(false);
@@ -25,7 +28,6 @@ export default function RootLayout() {
       try {
         await prologEngine.loadPrograms([lexer]);
         setPrologReady(true);
-        router.replace("/");
       } catch (e: any) {
         console.warn("Init error:", e.message);
         setPrologError(e.message);
@@ -36,6 +38,12 @@ export default function RootLayout() {
     }
     init();
   }, []);
+
+  useEffect(() => {
+    if (appReady) {
+      SplashScreen.hideAsync();
+    }
+  }, [appReady]);
 
   if (!appReady) return null;
 
