@@ -8,9 +8,14 @@ const retract = (fact: string) => prologEngine.retract(fact);
 
 export class PrologService {
   async tokenize(code: string) {
-    const safe = code.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const safe = code
+      .replace(/\\/g, "\\\\")
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
 
-    const result = await query(`tokenize('${safe}', Tokens)`);
+    const result = await query(`tokenize('${safe}', Tokens).`);
 
     console.log(result);
   }
