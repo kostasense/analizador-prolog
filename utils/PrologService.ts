@@ -10,7 +10,7 @@ export class PrologService {
   async tokenize(code: string) {
     const safe = code.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
-    const result = await prologEngine.queryOne(`tokenize('${safe}', Tokens)`);
+    const result = await query(`tokenize('${safe}', Tokens)`);
 
     console.log(result);
   }
