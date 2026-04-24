@@ -243,8 +243,8 @@ build_float(F) -->
     digits_(D0), 
     [0'.], 
     digits_(D1), 
-    { D0 \= [], 
-      D1 \= [],
+    { D0 \\= [], 
+      D1 \\= [],
       append(D0, [0'.|D1], Codes), 
       number_codes(F, Codes) 
     }.
