@@ -17,19 +17,19 @@ type(for,    'palabra reservada').
 type(return, 'palabra reservada').
 type(true,   'palabra reservada').
 type(false,  'palabra reservada').
- 
+
 % arithmetic operators
 type(+,   aritmetico).
 type(-,   aritmetico).
 type(*,   aritmetico).
 type(/,   aritmetico).
 type('%', aritmetico).
- 
+
 % logical operators
 type('&&', 'lógico').
 type('||', 'lógico').
 type('!',  'lógico').
- 
+
 % comparison operators
 type(==,   'comparación').
 type('!=', 'comparación').
@@ -37,18 +37,18 @@ type(<,    'comparación').
 type(<=,   'comparación').
 type(>,    'comparación').
 type(>=,   'comparación').
- 
+
 % math
 type('++', incremento).
 type('--', decremento).
- 
+
 % assigment
 type('=',  'asignación').
- 
+
 % steam
 type('>>', iostream).
 type('<<', ostream).
- 
+
 % punctuation
 type('(', 'puntuación').
 type(')', 'puntuación').
@@ -79,7 +79,7 @@ identifierStart(95).                              % underscore _
 
 identifierContent(Code):- code_type(Code, alnum). % a-z, A-Z, 0-9
 identifierContent(95).  
- 
+
 %!  tokenize(+String, -Tokens)
 %   convert a string into a list of tokens.
 tokenize(String, Tokens):-
@@ -88,7 +88,7 @@ tokenize(String, Tokens):-
 
 %!  token(+Tokens, -Token-Type) 
 token([], []).
- 
+
 token([Token | Rest], [Token-Type | Remaining]):-
     type(Token, Type), !,
     token(Rest, Remaining).
@@ -100,23 +100,23 @@ token([Token | Rest], [Token-identificador | Remaining]):-
 token([Token | Rest], [Token-error | Remaining]):-
     token(Rest, Remaining).
 
- 
+
 %!  atoms(+CharacterCodes, -Atoms)
 atoms([], []).
- 
+
 %   skip whitespace (space, tab, newline, carriage-return)
 atoms([32 | Rest], Atoms):- !, atoms(Rest, Atoms).   % space
 atoms([9  | Rest], Atoms):- !, atoms(Rest, Atoms).   % \t
 atoms([10 | Rest], Atoms):- !, atoms(Rest, Atoms).   % \n
 atoms([13 | Rest], Atoms):- !, atoms(Rest, Atoms).   % \r
- 
+
 %   string literals
 atoms([34 | RestCodes], [Atom | RestAtoms]):-
     !,
     buildString(RestCodes, StringCodes, RemainingCodes),
     atom_codes(Atom, [34 | StringCodes]),
     atoms(RemainingCodes, RestAtoms).
- 
+
 %   two-character operators
 atoms([38,  38  | Rest], ['&&' | RestAtoms]):- !, atoms(Rest, RestAtoms).
 atoms([124, 124 | Rest], ['||' | RestAtoms]):- !, atoms(Rest, RestAtoms).
@@ -128,7 +128,7 @@ atoms([62,  62  | Rest], ['>>' | RestAtoms]):- !, atoms(Rest, RestAtoms).
 atoms([60,  60  | Rest], ['<<' | RestAtoms]):- !, atoms(Rest, RestAtoms).
 atoms([43,  43  | Rest], ['++' | RestAtoms]):- !, atoms(Rest, RestAtoms).
 atoms([45,  45  | Rest], ['--' | RestAtoms]):- !, atoms(Rest, RestAtoms).
- 
+
 %   single-character operators and punctuation
 atoms([38  | Rest], ['&' | RestAtoms]):- !, atoms(Rest, RestAtoms).
 atoms([124 | Rest], ['|' | RestAtoms]):- !, atoms(Rest, RestAtoms).
@@ -149,7 +149,7 @@ atoms([33  | Rest], ['!' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % !
 atoms([61  | Rest], ['=' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % =
 atoms([60  | Rest], ['<' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % <
 atoms([62  | Rest], ['>' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % >
- 
+
 %   skip empty word
 atoms(Codes, RestAtoms):-
     build(Codes, WordCodes, RemainingCodes),
@@ -160,30 +160,30 @@ atoms(Codes, RestAtoms):-
 %   float literal
 atoms(Codes, [Atom | RestAtoms]):-
     build(Codes, FloatCodes, RemainingCodes),
-    phrase(float(Atom), FloatCodes),
+    phrase(build_float(Atom), FloatCodes),
     !,
     atoms(RemainingCodes, RestAtoms).
- 
+
 %   integer literal
 atoms(Codes, [Atom | RestAtoms]):-
     build(Codes, IntegerCodes, RemainingCodes),
-    phrase(integer(Atom), IntegerCodes),
+    phrase(build_integer(Atom), IntegerCodes),
     !,
     atoms(RemainingCodes, RestAtoms).
- 
+
 %   generic word
 atoms(Codes, [Atom | RestAtoms]):-
     build(Codes, WordCodes, RemainingCodes),
     atom_codes(Atom, WordCodes),
     atoms(RemainingCodes, RestAtoms).
- 
+
 %!  buildString(+InputCodes, -WordCodes, -Remainder)
 %   collect codes inside a string literal until the closing quotes
 buildString([34 | T], [34], T):- !.
 buildString([], [], []).
 buildString([H | T], [H | WordTail], Remainder):-
     buildString(T, WordTail, Remainder).
- 
+
 %!  special_char(+Code)
 %   true when Code is an operator or punctuation character.
 %   build/3 stops when it sees one of these.
@@ -206,7 +206,7 @@ special_char(45).   % -
 special_char(42).   % *
 special_char(47).   % /
 special_char(37).   % %
- 
+
 %!  build(+InputCodes, -WordCodes, -Remainder)
 %   collect alphanumeric/underscore codes into a word.
 %   stops at whitespace (consuming it) or a special char (leaving it).
@@ -219,4 +219,33 @@ build([H | T], [], [H | T]):-  % special char
     special_char(H), !.
 build([H | T], [H | WordTail], Remainder):-
     build(T, WordTail, Remainder).
+
+
+%   dcg rules for numbers
+build_integer(I) -->
+        digit_(D0),
+        digits_(D),
+        { number_codes(I, [D0|D])
+        }.
+
+build_float(F) --> 
+    digits_(D0), 
+    [0'.], 
+    digits_(D1), 
+    { D0 \\= [], 
+    D1 \\= [],
+    append(D0, [0'.|D1], Codes), 
+    number_codes(F, Codes) 
+    }.
+
+digits_([D|T]) -->
+        digit_(D), !,
+        digits_(T).
+digits_([]) -->
+        [].
+
+digit_(D) -->
+        [D],
+        { code_type(D, digit)
+        }.
 `;
