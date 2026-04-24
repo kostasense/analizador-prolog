@@ -40,7 +40,25 @@ export default function Index() {
   const handleAnalysis = async () => {
     setLoading(true);
 
-    await prologService.tokenize(code);
+    let foundLexemes = [];
+    //let foundSymbols = [];
+    let foundErrors = [];
+
+    const results = await prologService.getTokensResults(code);
+
+    for (let cont = 0; cont < results[0].Clasificados.length; cont++) {
+      const type = results[0].Clasificados[cont].args[1];
+      const token = results[0].Clasificados[cont].args[0];
+
+      if (type === "error") {
+        foundErrors.push({ message: token });
+      } else {
+        foundLexemes.push({ lexema: token, componente: type });
+      }
+    }
+
+    setErrors(foundErrors);
+    setLexemes(foundLexemes);
 
     setLoading(false);
   };
@@ -249,7 +267,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#d8d8d8",
     padding: 10,
-    minHeight: 180,
+    minHeight: 200,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
@@ -325,7 +343,10 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: "#e0e0e0",
   },
-  tableScroll: { flex: 1 },
+  tableScroll: {
+    flex: 1,
+    maxHeight: 200,
+  },
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 1,

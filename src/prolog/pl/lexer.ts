@@ -166,6 +166,7 @@ atoms(Codes, RestAtoms):-
     build(Codes, WordCodes, RemainingCodes),
     WordCodes = [],
     !,
+    write('>> skip empty word: '), write(Codes), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %   float literal
@@ -173,6 +174,7 @@ atoms(Codes, [Atom | RestAtoms]):-
     build(Codes, FloatCodes, RemainingCodes),
     phrase(build_float(Atom), FloatCodes),
     !,
+    write('>> float literal: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %   integer literal
@@ -180,12 +182,14 @@ atoms(Codes, [Atom | RestAtoms]):-
     build(Codes, IntegerCodes, RemainingCodes),
     phrase(build_integer(Atom), IntegerCodes),
     !,
+    write('>> integer literal: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %   generic word
 atoms(Codes, [Atom | RestAtoms]):-
     build(Codes, WordCodes, RemainingCodes),
     atom_codes(Atom, WordCodes),
+    write('>> generic word: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %!  buildString(+InputCodes, -WordCodes, -Remainder)
@@ -256,7 +260,7 @@ digits_([]) -->
         [].
 
 digit_(D) -->
-        [D],
-        { is_digit(D)
-        }.
+    [D],
+    { nonvar(D), is_digit(D) }.
+
 `;
