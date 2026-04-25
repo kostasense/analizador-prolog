@@ -1,4 +1,5 @@
 import { PrologService } from "@/utils/PrologService";
+import * as DocumentPicker from "expo-document-picker";
 import { useState } from "react";
 import {
   Platform,
@@ -61,6 +62,21 @@ export default function Index() {
     setLexemes(foundLexemes);
 
     setLoading(false);
+  };
+
+  const handleUpload = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled) return;
+
+    const file = result.assets[0];
+
+    const response = await fetch(file.uri);
+    const content = await response.text();
+    setCode(content);
   };
 
   return (
@@ -210,8 +226,16 @@ export default function Index() {
           </View>
         </View>
 
-        {/* Action Button */}
+        {/* Action Buttons */}
         <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleUpload}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.buttonText}>Subir Archivo</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleAnalysis}
@@ -268,6 +292,7 @@ const styles = StyleSheet.create({
     borderColor: "#d8d8d8",
     padding: 10,
     minHeight: 200,
+    maxHeight: 200,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
@@ -376,7 +401,9 @@ const styles = StyleSheet.create({
 
   // Button
   buttonRow: {
-    alignItems: "flex-end",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
     marginTop: 4,
     paddingBottom: 8,
   },
