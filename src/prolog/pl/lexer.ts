@@ -66,6 +66,18 @@ type(Atom, cadena):-
     atom_codes(Atom, [34 | Rest]),
     last(Rest, 34).
 
+% identifiers
+type(Atom, identificador):-
+    atom_codes(Atom, [First | Rest]),
+    identifier_start(First),
+    maplist(identifier_content, Rest).
+
+identifier_start(Code):- is_alpha(Code).         % a-z, A-Z
+identifier_start(95).                            % underscore _
+
+identifier_content(Code):- is_alnum(Code).       % a-z, A-Z, 0-9
+identifier_content(95).  
+
 % -------------------------------------------- helpers --------------------------------------------
 %   check if given code belongs to a digit
 is_digit(D):- D >= 48, D =< 57.
@@ -77,20 +89,6 @@ is_alpha(D):- D >= 97, D =< 122.
 is_alnum(D):- is_digit(D) ; is_alpha(D).
 
 % -------------------------------------------- tokenizer --------------------------------------------
-%!  identifier(+Atom)
-%   true when Atom is a valid identifier:
-%   starts with a letter or underscore, rest are letters, digits, or underscores.
-identifier(Atom):-
-    atom_codes(Atom, [First | Rest]),
-    identifier_start(First),
-    maplist(identifier_content, Rest).
-
-identifier_start(Code):- is_alpha(Code).         % a-z, A-Z
-identifier_start(95).                            % underscore _
-
-identifier_content(Code):- is_alnum(Code).       % a-z, A-Z, 0-9
-identifier_content(95).  
-
 %!  tokenize(+String, -Tokens)
 %   convert a string into a list of tokens.
 tokenize(String, Tokens):-
@@ -104,14 +102,10 @@ token([Token | Rest], [Token-Type | Remaining]):-
     type(Token, Type), !,
     token(Rest, Remaining).
 
-token([Token | Rest], [Token-identificador | Remaining]):-
-    identifier(Token),
-    token(Rest, Remaining).
-
 token([Token | Rest], [Token-error | Remaining]):-
     token(Rest, Remaining).
 
-
+% -------------------------------------------- atoms --------------------------------------------
 %!  atoms(+CharacterCodes, -Atoms)
 atoms([], []).
 
@@ -192,13 +186,6 @@ atoms(Codes, [Atom | RestAtoms]):-
     write('>> generic word: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
-%!  build_string(+InputCodes, -WordCodes, -Remainder)
-%   collect codes inside a string literal until the closing quotes
-build_string([34 | T], [34], T):- !.
-build_string([], [], []).
-build_string([H | T], [H | WordTail], Remainder):-
-    build_string(T, WordTail, Remainder).
-
 %!  special_char(+Code)
 %   true when Code is an operator or punctuation character.
 %   build/3 stops when it sees one of these.
@@ -222,6 +209,7 @@ special_char(42).   % *
 special_char(47).   % /
 special_char(37).   % %
 
+% -------------------------------------------- builders --------------------------------------------
 %!  build(+InputCodes, -WordCodes, -Remainder)
 %   collect alphanumeric/underscore codes into a word.
 %   stops at whitespace (consuming it) or a special char (leaving it).
@@ -230,34 +218,34 @@ build([9  | T], [], T):- !.    % tab
 build([10 | T], [], T):- !.    % newline    
 build([13 | T], [], T):- !.    % cr     
 build([], [], []).
+
+%!  build_string(+InputCodes, -WordCodes, -Remainder)
+%   collect codes inside a string literal until the closing quotes
+build_string([34 | T], [34], T):- !.
+build_string([], [], []).
+build_string([H | T], [H | WordTail], Remainder):-
+    build_string(T, WordTail, Remainder).
+
 build([H | T], [], [H | T]):-  % special char
     special_char(H), !.
+
 build([H | T], [H | WordTail], Remainder):-
     build(T, WordTail, Remainder).
 
 build_integer(I, [D0 | T0]):-
-        digit_(D0),
-        digits_(T0, D1, _),
+        is_digit(D0),
+        digits_(T0, D1, []),
         number_codes(I, [D0 | D1]).
 
 build_float(F, F0):- 
-    digits_(F0, D0, [R0 | T0]),
-    R0 =:= 46,
-    digits_(T0, D1, _), 
-    D0 \\= [], 
-    D1 \\= [],
-    append(D0, [R0 | D1], Codes), 
+    digits_(F0, D0, [46 | T0]),
+    digits_(T0, D1, []), 
+    D0 = [_ | _], 
+    D1 = [_ | _],
+    append(D0, [46 | D1], Codes), 
     number_codes(F, Codes).
 
 digits_([], [], []).
-
 digits_([46 | T], [], [46 | T]).
-
-digits_([D | T], [D | R], Rest):-
-        digit_(D), !,
-        digits_(T, R, Rest).
-
-digits_(L, [], L). 
-
-digit_(D):- is_digit(D).
+digits_([D | T], [D | R], Rest):- is_digit(D), !, digits_(T, R, Rest).
 `;
