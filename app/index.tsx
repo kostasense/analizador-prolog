@@ -42,7 +42,7 @@ export default function Index() {
     setLoading(true);
 
     let foundLexemes = [];
-    //let foundSymbols = [];
+    let foundSymbols = [];
     let foundErrors = [];
 
     const results = await prologService.getTokensResults(code);
@@ -50,6 +50,15 @@ export default function Index() {
     for (let cont = 0; cont < results[0].Clasificados.length; cont++) {
       const type = results[0].Clasificados[cont].args[1];
       const token = results[0].Clasificados[cont].args[0];
+
+      if (type === "identificador") {
+        foundSymbols.push({
+          identificador: token,
+          tipo: "",
+          valor: "",
+          posicion: 0,
+        });
+      }
 
       if (type === "error") {
         foundErrors.push({ message: token });
@@ -60,6 +69,7 @@ export default function Index() {
 
     setErrors(foundErrors);
     setLexemes(foundLexemes);
+    setSymbols(foundSymbols);
 
     setLoading(false);
   };
