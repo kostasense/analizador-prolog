@@ -427,24 +427,29 @@ parse_main([int - _ , main - _ , '(' - _ , void - _ , ')' - _ | E], S) :-
 % ------------------------------------------------------------
 % PROGRAMA COMPLETO
 % ------------------------------------------------------------
-parse_programa([], Funs, Funs, false).
+parse_programa([], Funs, Funs, Errs, Errs, false).
 
-parse_programa(E, Funs, Funs, TieneMain) :-
+parse_programa(E, Funs, Funs, ErrsIn, ErrsOut, TieneMain) :-
     E = [int - _ , main - _ , '(' - _ , void - _ , ')' - _ | _], 
     !,
-    evaluar_main(E, TieneMain).
+    evaluar_main(E, TieneMain, ErrsIn, ErrsOut).
 
-parse_programa(E, FunsIn, FunsOut, TieneMain) :-
+parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
     parse_fundef(E, Resto, Sym), 
     !,
-    parse_programa(Resto, [Sym | FunsIn], FunsOut, TieneMain).
+    parse_programa(Resto, [Sym | FunsIn], FunsOut, ErrsIn, ErrsOut, TieneMain).
 
-parse_programa([_ | Resto], FunsIn, FunsOut, TieneMain) :-
-    parse_programa(Resto, FunsIn, FunsOut, TieneMain).
+parse_programa([Tipo - _, Nombre - identificador, '(' - _ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
+    es_tipo_dato(Tipo), Nombre \\= main, !,
+    atomic_list_concat(['Error sintáctico en la función "', Nombre, '": Estructura interna o firma incorrecta.'], Msg),
+    parse_programa(Resto, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, TieneMain).
 
-evaluar_main(E, true) :- 
+parse_programa([_ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
+    parse_programa(Resto, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain).
+
+evaluar_main(E, true, Errs, Errs) :- 
     parse_main(E, _), !.
-evaluar_main(_, false).
+evaluar_main(_, false, ErrsIn, ['Error sintáctico en "main": Estructura interna o llaves incorrectas.' | ErrsIn]).
  
 % ------------------------------------------------------------
 % RECOLECCIÓN DE VARIABLES GLOBAL
@@ -473,18 +478,21 @@ errores_lexicos([T - error | R], [Msg | Errs]) :-
     errores_lexicos(R, Errs).
 errores_lexicos([_ | R], Errs) :- errores_lexicos(R, Errs).
 
-comprobar_error_main(true, []).
-comprobar_error_main(false, ['Error sintáctico: falta int main(void) o su estructura es incorrecta']).
+comprobar_error_main(true, Errs, Errs) :- !.
+comprobar_error_main(false, ErrsIn, ErrsIn) :-
+    member('Error sintáctico en "main": Estructura interna o llaves incorrectas.', ErrsIn), !.
+comprobar_error_main(false, ErrsIn, ['Error sintáctico: Falta la función obligatoria int main(void) o su firma es incorrecta.' | ErrsIn]).
+
  
 analizar(Codigo, Simbolos, Errores) :-
     tokenize(Codigo, RawTokens),
     token(RawTokens, Tokens),
     errores_lexicos(Tokens, ErrLex),
  
-    parse_programa(Tokens, [], FunSyms, TieneMain),
-    comprobar_error_main(TieneMain, ErrSin),
+    parse_programa(Tokens, [], FunSyms, [], ErrSinRaw, TieneMain),
+    comprobar_error_main(TieneMain, ErrSinRaw, ErrSin),
     recolectar_vars(Tokens, VarSyms, 0),
  
     append(ErrLex, ErrSin, Errores),
-    append(FunSyms, VarSyms, Simbolos). 
+    append(FunSyms, VarSyms, Simbolos).
 `;
