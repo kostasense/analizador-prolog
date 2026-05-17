@@ -23,12 +23,16 @@ if (numero > x) {
 }`;
 
 type Lexeme = { lexema: string; componente: string };
+
 type Symbol = {
-  identificador: string;
+  nombre: string;
+  categoria: "variable" | "funcion" | string;
   tipo: string;
   valor: string;
+  parametros: string;
   posicion: number;
 };
+
 type LexError = { message: string };
 
 export default function Index() {
@@ -37,41 +41,68 @@ export default function Index() {
   const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [errors, setErrors] = useState<LexError[]>([]);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"lexico" | "sintactico">("lexico");
 
-  const handleAnalysis = async () => {
+  // ── Lexical-only analysis (original behaviour) ──────────────────────────
+  const handleLexicalAnalysis = async () => {
     setLoading(true);
 
-    let foundLexemes = [];
-    let foundSymbols = [];
-    let foundErrors = [];
+    const foundLexemes: Lexeme[] = [];
+    const foundSymbols: Symbol[] = [];
+    const foundErrors: LexError[] = [];
 
     const results = await prologService.getTokensResults(code);
 
+    let pos = 0;
     for (let cont = 0; cont < results[0].Clasificados.length; cont++) {
       const type = results[0].Clasificados[cont].args[1];
       const token = results[0].Clasificados[cont].args[0];
 
       if (type === "identificador") {
         foundSymbols.push({
-          identificador: token,
+          nombre: String(token),
+          categoria: "variable",
           tipo: "",
-          valor: "",
-          posicion: 0,
+          valor: "-",
+          parametros: "-",
+          posicion: pos++,
         });
       }
 
       if (type === "error") {
-        foundErrors.push({ message: token });
+        foundErrors.push({ message: String(token) });
       } else {
-        foundLexemes.push({ lexema: token, componente: type });
+        foundLexemes.push({ lexema: String(token), componente: String(type) });
       }
     }
 
     setErrors(foundErrors);
     setLexemes(foundLexemes);
     setSymbols(foundSymbols);
-
     setLoading(false);
+  };
+
+  const handleSyntacticAnalysis = async () => {
+    setLoading(true);
+
+    const {
+      lexemes: lex,
+      symbols: syms,
+      errors: errs,
+    } = await prologService.analyzeCode(code);
+
+    setLexemes(lex);
+    setSymbols(syms);
+    setErrors(errs.map((e) => ({ message: e })));
+    setLoading(false);
+  };
+
+  const handleAnalysis = () => {
+    if (mode === "lexico") {
+      handleLexicalAnalysis();
+    } else {
+      handleSyntacticAnalysis();
+    }
   };
 
   const handleUpload = async () => {
@@ -83,11 +114,12 @@ export default function Index() {
     if (result.canceled) return;
 
     const file = result.assets[0];
-
     const response = await fetch(file.uri);
     const content = await response.text();
     setCode(content);
   };
+
+  const isFuncion = (s: Symbol) => s.categoria === "funcion";
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -97,7 +129,40 @@ export default function Index() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Análisis Léxico</Text>
+          <Text style={styles.headerTitle}>Analizador Léxico / Sintáctico</Text>
+        </View>
+
+        {/* Mode selector */}
+        <View style={styles.modeRow}>
+          <TouchableOpacity
+            style={[styles.modeBtn, mode === "lexico" && styles.modeBtnActive]}
+            onPress={() => setMode("lexico")}
+          >
+            <Text
+              style={[
+                styles.modeBtnText,
+                mode === "lexico" && styles.modeBtnTextActive,
+              ]}
+            >
+              Léxico
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.modeBtn,
+              mode === "sintactico" && styles.modeBtnActive,
+            ]}
+            onPress={() => setMode("sintactico")}
+          >
+            <Text
+              style={[
+                styles.modeBtnText,
+                mode === "sintactico" && styles.modeBtnTextActive,
+              ]}
+            >
+              Sintáctico
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Top row */}
@@ -123,7 +188,11 @@ export default function Index() {
 
           {/* Errors */}
           <View style={[styles.card, styles.flex1]}>
-            <Text style={styles.cardTitle}>Zona de Errores Léxicos</Text>
+            <Text style={styles.cardTitle}>
+              {mode === "lexico"
+                ? "Zona de Errores Léxicos"
+                : "Zona de Errores (Léxicos / Sintácticos)"}
+            </Text>
             <ScrollView style={styles.errorScroll}>
               {errors.length === 0 ? (
                 <Text style={styles.emptyText}>Sin errores</Text>
@@ -184,19 +253,23 @@ export default function Index() {
             </ScrollView>
           </View>
 
-          {/* Symbols Table */}
+          {/* Symbols Table — unified for variables and functions */}
           <View style={[styles.card, styles.flex1]}>
             <Text style={styles.cardTitle}>Tabla de Símbolos</Text>
+
             <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeaderCell, styles.flex1]}>
-                Identificador
+              <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>
+                Nombre
               </Text>
+              <Text style={[styles.tableHeaderCell, styles.flex1]}>Cat.</Text>
               <Text style={[styles.tableHeaderCell, styles.flex1]}>Tipo</Text>
               <Text style={[styles.tableHeaderCell, styles.flex1]}>Valor</Text>
-              <Text style={[styles.tableHeaderCell, styles.flex1]}>
-                Posición
+              <Text style={[styles.tableHeaderCell, { flex: 1.4 }]}>
+                Params
               </Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Pos.</Text>
             </View>
+
             <ScrollView style={styles.tableScroll}>
               {symbols.length === 0 ? (
                 <Text style={styles.emptyText}>Sin símbolos</Text>
@@ -207,25 +280,51 @@ export default function Index() {
                     style={[
                       styles.tableRow,
                       i % 2 === 0 && styles.tableRowEven,
+                      isFuncion(s) && styles.tableRowFun,
                     ]}
                   >
                     <Text
                       style={[
                         styles.tableCell,
-                        styles.flex1,
+                        { flex: 1.2 },
                         styles.codeFontCell,
                       ]}
                     >
-                      {s.identificador}
+                      {s.nombre}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.tableCell,
+                        styles.flex1,
+                        isFuncion(s) ? styles.catFun : styles.catVar,
+                      ]}
+                    >
+                      {s.categoria}
                     </Text>
                     <Text style={[styles.tableCell, styles.flex1]}>
                       {s.tipo}
                     </Text>
-                    <Text style={[styles.tableCell, styles.flex1]}>
+                    <Text
+                      style={[
+                        styles.tableCell,
+                        styles.flex1,
+                        s.valor === "-" && styles.dash,
+                      ]}
+                    >
                       {s.valor}
                     </Text>
                     <Text
-                      style={[styles.tableCell, styles.flex1, styles.center]}
+                      style={[
+                        styles.tableCell,
+                        { flex: 1.4 },
+                        styles.codeFontCell,
+                        s.parametros === "-" && styles.dash,
+                      ]}
+                    >
+                      {s.parametros}
+                    </Text>
+                    <Text
+                      style={[styles.tableCell, { flex: 0.6 }, styles.center]}
                     >
                       {s.posicion}
                     </Text>
@@ -253,7 +352,11 @@ export default function Index() {
             activeOpacity={0.8}
           >
             <Text style={styles.buttonText}>
-              {loading ? "Analizando..." : "Análisis Léxico"}
+              {loading
+                ? "Analizando..."
+                : mode === "lexico"
+                  ? "Análisis Léxico"
+                  : "Análisis Sintáctico"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -266,14 +369,9 @@ const FONT_MONO = Platform.OS === "ios" ? "Menlo" : "monospace";
 const FONT_UI = Platform.OS === "ios" ? "System" : "sans-serif";
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#f0f0f0",
-  },
-  container: {
-    padding: 12,
-    gap: 10,
-  },
+  safe: { flex: 1, backgroundColor: "#f0f0f0" },
+  container: { padding: 12, gap: 10 },
+
   header: {
     backgroundColor: "#e8e8e8",
     borderRadius: 10,
@@ -291,10 +389,30 @@ const styles = StyleSheet.create({
     fontFamily: FONT_UI,
     letterSpacing: 0.3,
   },
-  row: {
+
+  // Mode toggle
+  modeRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
+    justifyContent: "center",
+    marginBottom: 2,
   },
+  modeBtn: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#bbb",
+    paddingVertical: 6,
+    paddingHorizontal: 20,
+    backgroundColor: "#fff",
+  },
+  modeBtnActive: {
+    backgroundColor: "#4a4a4a",
+    borderColor: "#4a4a4a",
+  },
+  modeBtnText: { fontSize: 13, color: "#555", fontFamily: FONT_UI },
+  modeBtnTextActive: { color: "#fff", fontWeight: "600" },
+
+  row: { flexDirection: "row", gap: 10 },
   card: {
     backgroundColor: "#ffffff",
     borderRadius: 10,
@@ -320,7 +438,6 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   flex2: { flex: 2 },
 
-  // Code editor
   codeInput: {
     flex: 1,
     minHeight: 150,
@@ -335,7 +452,6 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 
-  // Errors
   errorScroll: { flex: 1 },
   errorRow: {
     flexDirection: "row",
@@ -344,12 +460,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   errorDot: { color: "#e53e3e", fontSize: 10, marginTop: 2 },
-  errorText: {
-    fontFamily: FONT_MONO,
-    fontSize: 12,
-    color: "#c53030",
-    flex: 1,
-  },
+  errorText: { fontFamily: FONT_MONO, fontSize: 12, color: "#c53030", flex: 1 },
   emptyText: {
     fontSize: 12,
     color: "#aaa",
@@ -359,7 +470,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
-  // Tables
   tableHeader: {
     flexDirection: "row",
     backgroundColor: "#f5f5f5",
@@ -378,18 +488,14 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: "#e0e0e0",
   },
-  tableScroll: {
-    flex: 1,
-    maxHeight: 200,
-  },
+  tableScroll: { flex: 1, maxHeight: 200 },
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
   },
-  tableRowEven: {
-    backgroundColor: "#f9f9f9",
-  },
+  tableRowEven: { backgroundColor: "#f9f9f9" },
+  tableRowFun: { backgroundColor: "#eef4ff" }, // light blue tint for functions
   tableCell: {
     fontSize: 12,
     color: "#222",
@@ -398,18 +504,13 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: "#eee",
   },
-  codeFontCell: {
-    fontFamily: FONT_MONO,
-    fontSize: 12,
-    color: "#2b4f8e",
-  },
-  tagCell: {
-    color: "#6b4c00",
-    fontWeight: "500",
-  },
+  codeFontCell: { fontFamily: FONT_MONO, fontSize: 12, color: "#2b4f8e" },
+  tagCell: { color: "#6b4c00", fontWeight: "500" },
+  catVar: { color: "#276227", fontWeight: "500" },
+  catFun: { color: "#1a4d8f", fontWeight: "500" },
+  dash: { color: "#aaa" },
   center: { textAlign: "center" },
 
-  // Button
   buttonRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
@@ -428,9 +529,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  buttonDisabled: {
-    backgroundColor: "#999",
-  },
+  buttonDisabled: { backgroundColor: "#999" },
   buttonText: {
     color: "#ffffff",
     fontSize: 14,

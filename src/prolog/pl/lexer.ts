@@ -248,4 +248,243 @@ build_float(F, F0):-
 digits_([], [], []).
 digits_([46 | T], [], [46 | T]).
 digits_([D | T], [D | R], Rest):- is_digit(D), !, digits_(T, R, Rest).
+ 
+es_tipo_dato(int).
+es_tipo_dato(float).
+es_tipo_dato(double).
+es_tipo_dato(bool).
+es_tipo_dato(string).
+es_tipo_dato(void).
+ 
+es_op_bin(_ - aritmetico).
+es_op_bin(_ - 'comparación').
+es_op_bin(_ - 'lógico').
+ 
+es_op_un('!' - 'lógico').
+es_op_un((-) - aritmetico).
+ 
+es_literal(_ - entero).
+es_literal(_ - real).
+es_literal(_ - cadena).
+es_literal(true - _).
+es_literal(false - _).
+ 
+% ------------------------------------------------------------
+% EXPRESIÓN
+% ------------------------------------------------------------
+parse_expr(E, S) :-
+    parse_atomo(E, Mid),
+    parse_expr_cola(Mid, S).
+ 
+parse_expr_cola([Op | Mid], S) :-
+    es_op_bin(Op), !, 
+    parse_expr(Mid, S).
+parse_expr_cola(S, S).
+ 
+parse_atomo(['(' - _ | E], S) :-
+    !,
+    parse_expr(E, [')' - _ | S]).
+parse_atomo([Op | E], S) :-
+    es_op_un(Op), !,
+    parse_atomo(E, S).
+parse_atomo([T | S], S) :-
+    es_literal(T), !.
+parse_atomo([_ - identificador | S], S) :- !.
+ 
+% ------------------------------------------------------------
+% PARÁMETROS
+% ------------------------------------------------------------
+parse_params([')' - _ | S], S, []) :- !.
+parse_params([Tipo - _ , Nombre - identificador | E], S, [Tipo-Nombre | Resto]) :-
+    es_tipo_dato(Tipo), !,
+    parse_params_sep(E, S, Resto).
+parse_params(S, S, []).
+ 
+parse_params_sep([',' - _ | E], S, Resto) :-
+    !, parse_params(E, S, Resto).
+parse_params_sep([')' - _ | S], S, []) :- !.
+parse_params_sep(S, S, []).
+ 
+params_a_texto([], '()').
+params_a_texto(Params, Texto) :-
+    Params \\= [],
+    maplist(par_texto, Params, Partes),
+    atomic_list_concat(Partes, ', ', Interior),
+    atom_concat('(', Interior, T1),
+    atom_concat(T1, ')', Texto).
+ 
+par_texto(Tipo - Nombre, Parte) :-
+    atomic_list_concat([Tipo, ' ', Nombre], Parte).
+ 
+% ------------------------------------------------------------
+% DECLARACIÓN DE VARIABLE
+% ------------------------------------------------------------
+parse_vardef([Tipo - _ , Nombre - identificador | E], S, Pos,
+             sym(Nombre, variable, Tipo, Valor, '-', Pos)) :-
+    es_tipo_dato(Tipo),
+    parse_vardef_init(E, S, Valor).
+ 
+parse_vardef_init([';' - _ | S], S, '-') :- !.
+parse_vardef_init(['=' - _ | E], S, '(expr)') :-
+    !, parse_expr(E, [';' - _ | S]).
+parse_vardef_init(['{' - _ | E], S, '(init-list)') :-
+    !, parse_expr(E, ['}' - _ , ';' - _ | S]).
+ 
+% ------------------------------------------------------------
+% BLOQUE Y SENTENCIAS
+% ------------------------------------------------------------
+parse_bloque(['{' - _ | E], S, Syms) :-
+    parse_vardefs(E, Mid, Syms, 0),
+    parse_stmts(Mid, ['}' - _ | S]).
+ 
+parse_vardefs(E, S, [Sym | Resto], Pos) :-
+    E = [Tipo - _ , Nombre - identificador | _],
+    Nombre \\= main,
+    es_tipo_dato(Tipo), !,
+    parse_vardef(E, Mid, Pos, Sym),
+    Pos1 is Pos + 1,
+    parse_vardefs(Mid, S, Resto, Pos1).
+parse_vardefs(E, E, [], _).
+ 
+parse_stmts(E, E) :- E = ['}' - _ | _], !.
+parse_stmts([], []) :- !.
+parse_stmts(E, S) :-
+    parse_stmt(E, Mid),
+    parse_stmts(Mid, S).
+ 
+% ------------------------------------------------------------
+% SENTENCIA
+% ------------------------------------------------------------
+parse_stmt([_ - identificador , '=' - _ | E], S) :-
+    !, parse_expr(E, [';' - _ | S]).
+parse_stmt([_ - identificador , '++' - _ , ';' - _ | S], S) :- !.
+parse_stmt([_ - identificador , '--' - _ , ';' - _ | S], S) :- !.
+parse_stmt(['++' - _ , _ - identificador , ';' - _ | S], S) :- !.
+parse_stmt(['--' - _ , _ - identificador , ';' - _ | S], S) :- !.
+parse_stmt([return - _ , ';' - _ | S], S) :- !.
+parse_stmt([return - _ | E], S) :- !, parse_expr(E, [';' - _ | S]).
+parse_stmt([if    - _ | E], S) :- !, parse_if(E, S).
+parse_stmt([while - _ | E], S) :- !, parse_while(E, S).
+parse_stmt([do    - _ | E], S) :- !, parse_do(E, S).
+parse_stmt([for   - _ | E], S) :- !, parse_for(E, S).
+parse_stmt([_ | E], S) :- skip_semi(E, S).
+ 
+skip_semi([';' - _ | S], S) :- !.
+skip_semi([_ | E], S) :- skip_semi(E, S).
+skip_semi([], []).
+ 
+% ------------------------------------------------------------
+% ESTRUCTURAS DE CONTROL
+% ------------------------------------------------------------
+parse_if(['(' - _ | E], S) :-
+    parse_expr(E, [')' - _ | Mid]),
+    parse_bloque(Mid, Mid2, _),
+    parse_else(Mid2, S).
+ 
+parse_else([else - _ , if - _ | E], S) :- !, parse_if(E, S).
+parse_else([else - _ | E], S)          :- !, parse_bloque(E, S, _).
+parse_else(E, E).
+ 
+parse_while(['(' - _ | E], S) :-
+    parse_expr(E, [')' - _ | Mid]),
+    parse_bloque(Mid, S, _).
+ 
+parse_do(E, S) :-
+    parse_bloque(E, [while - _ , '(' - _ | Mid], _),
+    parse_expr(Mid, [')' - _ , ';' - _ | S]).
+ 
+parse_for(['(' - _ | E], S) :-
+    parse_stmt(E, Mid1),
+    parse_expr(Mid1, [';' - _ | Mid2]),
+    parse_update(Mid2, [')' - _ | Mid3]),
+    parse_bloque(Mid3, S, _).
+ 
+parse_update([_ - identificador , '++' - _ | S], S) :- !.
+parse_update([_ - identificador , '--' - _ | S], S) :- !.
+parse_update(['++' - _ , _ - identificador | S], S) :- !.
+parse_update(['--' - _ , _ - identificador | S], S) :- !.
+parse_update([_ - identificador , '=' - _ | E], S) :- !, parse_expr(E, S).
+parse_update([_ | E], S) :- parse_update(E, S).
+ 
+% ------------------------------------------------------------
+% DEFINICIÓN DE FUNCIÓN
+% ------------------------------------------------------------
+parse_fundef([Tipo - _ , Nombre - identificador , '(' - _ | E], S,
+             sym(Nombre, funcion, Tipo, '-', ParamsStr, 0)) :-
+    es_tipo_dato(Tipo),
+    Nombre \\= main,
+    parse_params(E, Mid, Params),
+    Mid = ['{' - _ | _],
+    params_a_texto(Params, ParamsStr),
+    parse_bloque(Mid, S, _).
+ 
+% ------------------------------------------------------------
+% FUNCIÓN MAIN
+% ------------------------------------------------------------
+parse_main([int - _ , main - _ , '(' - _ , void - _ , ')' - _ | E], S) :-
+    parse_bloque(E, S, _).
+ 
+% ------------------------------------------------------------
+% PROGRAMA COMPLETO
+% ------------------------------------------------------------
+parse_programa([], Funs, Funs, false).
+
+parse_programa(E, Funs, Funs, TieneMain) :-
+    E = [int - _ , main - _ , '(' - _ , void - _ , ')' - _ | _], 
+    !,
+    evaluar_main(E, TieneMain).
+
+parse_programa(E, FunsIn, FunsOut, TieneMain) :-
+    parse_fundef(E, Resto, Sym), 
+    !,
+    parse_programa(Resto, [Sym | FunsIn], FunsOut, TieneMain).
+
+parse_programa([_ | Resto], FunsIn, FunsOut, TieneMain) :-
+    parse_programa(Resto, FunsIn, FunsOut, TieneMain).
+
+evaluar_main(E, true) :- 
+    parse_main(E, _), !.
+evaluar_main(_, false).
+ 
+% ------------------------------------------------------------
+% RECOLECCIÓN DE VARIABLES GLOBAL
+% ------------------------------------------------------------
+recolectar_vars([], [], _).
+recolectar_vars([Tipo - _ , Nombre - identificador , ';' - _ | R],
+                [sym(Nombre, variable, Tipo, '-', '-', Pos) | Syms], Pos) :-
+    es_tipo_dato(Tipo), Nombre \\= main, !,
+    Pos1 is Pos + 1,
+    recolectar_vars(R, Syms, Pos1).
+recolectar_vars([Tipo - _ , Nombre - identificador , '=' - _ | R0],
+                [sym(Nombre, variable, Tipo, '(expr)', '-', Pos) | Syms], Pos) :-
+    es_tipo_dato(Tipo), Nombre \\= main, !,
+    skip_semi(R0, R1),
+    Pos1 is Pos + 1,
+    recolectar_vars(R1, Syms, Pos1).
+recolectar_vars([_ | R], Syms, Pos) :- recolectar_vars(R, Syms, Pos).
+ 
+% ------------------------------------------------------------
+% MANEJO DE ERRORES Y ENTRADA
+% ------------------------------------------------------------
+errores_lexicos([], []).
+errores_lexicos([T - error | R], [Msg | Errs]) :-
+    !,
+    atomic_list_concat(['Token desconocido: ', T], Msg),
+    errores_lexicos(R, Errs).
+errores_lexicos([_ | R], Errs) :- errores_lexicos(R, Errs).
+
+comprobar_error_main(true, []).
+comprobar_error_main(false, ['Error sintáctico: falta int main(void) o su estructura es incorrecta']).
+ 
+analizar(Codigo, Simbolos, Errores) :-
+    tokenize(Codigo, RawTokens),
+    token(RawTokens, Tokens),
+    errores_lexicos(Tokens, ErrLex),
+ 
+    parse_programa(Tokens, [], FunSyms, TieneMain),
+    comprobar_error_main(TieneMain, ErrSin),
+    recolectar_vars(Tokens, VarSyms, 0),
+ 
+    append(ErrLex, ErrSin, Errores),
+    append(FunSyms, VarSyms, Simbolos). 
 `;
