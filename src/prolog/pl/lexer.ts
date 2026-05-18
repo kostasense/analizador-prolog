@@ -88,6 +88,18 @@ is_alpha(D):- D >= 97, D =< 122.
 
 is_alnum(D):- is_digit(D) ; is_alpha(D).
 
+skip_to_close(E, E) :-
+    E = [int - _, main - _ , '(' - _ | _], !.
+
+skip_to_close(E, E) :-
+    E = [Tipo - _, _ - identificador, '(' - _ | _],
+    es_tipo_dato(Tipo), !.
+
+skip_to_close(['}' - _ | T], T):- !.
+
+skip_to_close([_ | T], R) :- 
+    skip_to_close(T, R).
+
 % -------------------------------------------- tokenizer --------------------------------------------
 %!  tokenize(+String, -Tokens)
 %   convert a string into a list of tokens.
@@ -303,7 +315,6 @@ parse_params(S, S, []).
 parse_params_sep([',' - _ | E], S, Resto) :-
     !, parse_params(E, S, Resto).
 parse_params_sep([')' - _ | S], S, []) :- !.
-parse_params_sep(S, S, []).
  
 params_a_texto([], '()').
 params_a_texto(Params, Texto) :-
@@ -415,7 +426,7 @@ parse_fundef([Tipo - _ , Nombre - identificador , '(' - _ | E], S,
     Nombre \\= main,
     parse_params(E, Mid, Params),
     Mid = ['{' - _ | _],
-    params_a_texto(Params, ParamsStr),
+    params_a_texto(Params, ParamsStr), 
     parse_bloque(Mid, S, _).
  
 % ------------------------------------------------------------
@@ -439,9 +450,12 @@ parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
     !,
     parse_programa(Resto, [Sym | FunsIn], FunsOut, ErrsIn, ErrsOut, TieneMain).
 
-parse_programa([Tipo - _, Nombre - identificador, '(' - _ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
-    es_tipo_dato(Tipo), Nombre \\= main, !,
+parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
+    E = [Tipo - _, Nombre - identificador | Resto0],
+    es_tipo_dato(Tipo), Nombre \\= main,
+    \\+ parse_fundef(E, _, _), !,
     atomic_list_concat(['Error sintáctico en la función "', Nombre, '": Estructura interna o firma incorrecta.'], Msg),
+    skip_to_close(Resto0, Resto),
     parse_programa(Resto, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, TieneMain).
 
 parse_programa([_ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
@@ -467,6 +481,29 @@ recolectar_vars([Tipo - _ , Nombre - identificador , '=' - _ | R0],
     Pos1 is Pos + 1,
     recolectar_vars(R1, Syms, Pos1).
 recolectar_vars([_ | R], Syms, Pos) :- recolectar_vars(R, Syms, Pos).
+
+% ------------------------------------------------------------
+% VALIDACIÓN DE BALANCEO DE LLAVES Y PARÉNTESIS
+% ------------------------------------------------------------
+verificar_balanceo(Tokens, Error) :-
+    balanceo_stack(Tokens, [], Error).
+
+balanceo_stack([], [], _) :- !, fail. 
+
+balanceo_stack([], [Llave - _ | _], Error) :-
+    Llave == '{', !,
+    Error = 'Error sintáctico: Falta llave de cierre ("}") en alguna parte del código.'.
+
+balanceo_stack(['{' - T | Resto], Stack, Error) :- !,
+    balanceo_stack(Resto, ['{' - T | Stack], Error).
+
+balanceo_stack(['}' - _ | Resto], ['{' - _ | StackResto], Error) :- !,
+    balanceo_stack(Resto, StackResto, Error).
+
+balanceo_stack(['}' - _ | _], _, 'Error sintáctico: Llave de cierre ("}") inesperada o mal balanceada.') :- !.
+
+balanceo_stack([_ | Resto], Stack, Error) :-
+    balanceo_stack(Resto, Stack, Error).
  
 % ------------------------------------------------------------
 % MANEJO DE ERRORES Y ENTRADA
@@ -492,7 +529,16 @@ analizar(Codigo, Simbolos, Errores) :-
     parse_programa(Tokens, [], FunSyms, [], ErrSinRaw, TieneMain),
     comprobar_error_main(TieneMain, ErrSinRaw, ErrSin),
     recolectar_vars(Tokens, VarSyms, 0),
- 
-    append(ErrLex, ErrSin, Errores),
-    append(FunSyms, VarSyms, Simbolos).
+
+    (   verificar_balanceo(Tokens, ErrBalanceo) ->
+        Simbolos = [],
+        append(ErrLex, [ErrBalanceo], Errores)
+    ;   
+        parse_programa(Tokens, [], FunSyms, [], ErrSinRaw, TieneMain),
+        comprobar_error_main(TieneMain, ErrSinRaw, ErrSin),
+        recolectar_vars(Tokens, VarSyms, 0),
+     
+        append(ErrLex, ErrSin, Errores),
+        append(FunSyms, VarSyms, Simbolos)
+    ).
 `;

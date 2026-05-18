@@ -93,7 +93,7 @@ export class PrologService {
       console.error(err);
     }
 
-    const errors = [...lexErrors, ...synErrors];
+    const errors = [...synErrors];
 
     if (synErrors.length > 0) {
       symbols = [];
