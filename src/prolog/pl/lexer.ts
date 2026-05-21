@@ -450,12 +450,13 @@ parse_main([int - _ , main - _ , '(' - _ , void - _ , ')' - _ | E], S) :-
 % ------------------------------------------------------------
 % PROGRAMA COMPLETO
 % ------------------------------------------------------------
-parse_programa([], Funs, Funs, Errs, Errs, false).
 
-parse_programa(E, Funs, Funs, ErrsIn, ErrsOut, TieneMain) :-
-    E = [int - _ , main - _ , '(' - _ , void - _ , ')' - _ | _], 
+parse_programa([], Funs, Funs, Errs, Errs, _).
+
+parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, true) :-
+    E = [int - _ , main - _ , '(' - _ , void - _ , ')' - _ | RestoFirma], 
     !,
-    evaluar_main(E, TieneMain, ErrsIn, ErrsOut).
+    evaluar_main_y_continuar(RestoFirma, FunsIn, FunsOut, ErrsIn, ErrsOut).
 
 parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
     parse_fundef(E, Resto, Sym), 
@@ -465,17 +466,23 @@ parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
 parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
     E = [Tipo - _, Nombre - identificador | Resto0],
     es_tipo_dato(Tipo), Nombre \\= main,
-    \\+ parse_fundef(E, _, _), !,
+    member('(' - _, Resto0), !,
     atomic_list_concat(['Error sintáctico en la función "', Nombre, '": Estructura interna o firma incorrecta.'], Msg),
     skip_to_close(Resto0, Resto),
     parse_programa(Resto, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, TieneMain).
 
-parse_programa([_ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
-    parse_programa(Resto, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain).
+parse_programa([Token - _ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
+    atomic_list_concat(['Error sintáctico: Elemento no permitido o fuera de lugar en el espacio global ("', Token, '").'], Msg),
+    parse_programa(Resto, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, TieneMain).
 
-evaluar_main(E, true, Errs, Errs) :- 
-    parse_main(E, _), !.
-evaluar_main(_, false, ErrsIn, ['Error sintáctico en "main": Estructura interna o llaves incorrectas.' | ErrsIn]).
+evaluar_main_y_continuar(['{' - Fila | RestoBloque], FunsIn, FunsOut, ErrsIn, ErrsOut) :-
+    !,
+    skip_to_close(RestoBloque, TokensPostMain),
+    parse_programa(TokensPostMain, FunsIn, FunsOut, ErrsIn, ErrsOut, true).
+
+evaluar_main_y_continuar(RestoFirma, FunsIn, FunsOut, ErrsIn, ErrsOut) :-
+    atomic_list_concat(['Error sintáctico: Se esperaba "{" después de la firma de int main(void).'], Msg),
+    parse_programa(RestoFirma, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, true).
  
 % ------------------------------------------------------------
 % RECOLECCIÓN DE VARIABLES GLOBAL
