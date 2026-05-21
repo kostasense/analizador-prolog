@@ -432,14 +432,23 @@ parse_update([_ - identificador, OpComp - _ | E], S) :-
 % ------------------------------------------------------------
 % DEFINICIÓN DE FUNCIÓN
 % ------------------------------------------------------------
-parse_fundef([Tipo - _ , Nombre - identificador , '(' - _ | E], S,
-             sym(Nombre, funcion, Tipo, '-', ParamsStr, 0)) :-
+parse_fundef([Tipo - _ , Nombre - identificador , '(' - _ | E], Resto,
+             sym(Nombre, funcion, Tipo, '-', ParamsStr, 0), ErrsIn, ErrsOut) :-
     es_tipo_dato(Tipo),
     Nombre \\= main,
     parse_params(E, Mid, Params),
-    Mid = ['{' - _ | _],
+    Mid = ['{' - _ | _], !,
     params_a_texto(Params, ParamsStr), 
-    parse_bloque(Mid, S, _).
+    evaluar_cuerpo_funcion(Nombre, Mid, Resto, ErrsIn, ErrsOut).
+
+evaluar_cuerpo_funcion(_, Mid, Resto, ErrsIn, ErrsIn) :-
+    parse_bloque(Mid, Resto, _), !.
+
+evaluar_cuerpo_funcion(Nombre, Mid, Resto, ErrsIn, ErrsOut) :-
+    atomic_list_concat(['Error sintáctico interno en la función "', Nombre, '". Verifique instrucciones o signos de puntuación.'], Msg),
+    ErrsOut = [Msg | ErrsIn],
+    % Forzamos un skip controlado por llaves balanceadas desde la apertura '{' de la función
+    skip_bloque_con_llaves(Mid, Resto).
  
 % ------------------------------------------------------------
 % FUNCIÓN MAIN
@@ -459,30 +468,59 @@ parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, true) :-
     evaluar_main_y_continuar(RestoFirma, FunsIn, FunsOut, ErrsIn, ErrsOut).
 
 parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
-    parse_fundef(E, Resto, Sym), 
+    parse_fundef(E, Resto, Sym, ErrsIn, ErrsMid), 
     !,
-    parse_programa(Resto, [Sym | FunsIn], FunsOut, ErrsIn, ErrsOut, TieneMain).
+    parse_programa(Resto, [Sym | FunsIn], FunsOut, ErrsMid, ErrsOut, TieneMain).
 
 parse_programa(E, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
     E = [Tipo - _, Nombre - identificador | Resto0],
-    es_tipo_dato(Tipo), Nombre \\= main,
-    member('(' - _, Resto0), !,
-    atomic_list_concat(['Error sintáctico en la función "', Nombre, '": Estructura interna o firma incorrecta.'], Msg),
-    skip_to_close(Resto0, Resto),
+    es_tipo_dato(Tipo), Nombre \\= main, !,
+    atomic_list_concat(['Error sintáctico en la firma o estructura de la función "', Nombre, '".'], Msg),
+    skip_bloque_con_llaves(Resto0, Resto),
     parse_programa(Resto, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, TieneMain).
 
 parse_programa([Token - _ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
+    \\+ es_tipo_dato(Token),
+    Token \\= '}', 
+    !,
     atomic_list_concat(['Error sintáctico: Elemento no permitido o fuera de lugar en el espacio global ("', Token, '").'], Msg),
     parse_programa(Resto, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, TieneMain).
 
-evaluar_main_y_continuar(['{' - Fila | RestoBloque], FunsIn, FunsOut, ErrsIn, ErrsOut) :-
+parse_programa(['}' - _ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :- 
     !,
-    skip_to_close(RestoBloque, TokensPostMain),
-    parse_programa(TokensPostMain, FunsIn, FunsOut, ErrsIn, ErrsOut, true).
+    parse_programa(Resto, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain).
+
+parse_programa([_ | Resto], FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain) :-
+    !,
+    parse_programa(Resto, FunsIn, FunsOut, ErrsIn, ErrsOut, TieneMain).
+
+% ============================================================================
+% PREDICADOS AUXILIARES
+% ============================================================================
+
+evaluar_main_y_continuar(['{' - L | RestoBloque], FunsIn, FunsOut, ErrsIn, ErrsOut) :-
+    !,
+    ( parse_bloque(['{' - L | RestoBloque], TokensPostMain, _) ->
+        parse_programa(TokensPostMain, FunsIn, FunsOut, ErrsIn, ErrsOut, true)
+    ;
+        atomic_list_concat(['Error sintáctico dentro del cuerpo de la función "main". Verifique los puntos y coma o sentencias.'], Msg),
+        skip_bloque_con_llaves(['{' - L | RestoBloque], TokensPostMain),
+        parse_programa(TokensPostMain, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, true)
+    ).
 
 evaluar_main_y_continuar(RestoFirma, FunsIn, FunsOut, ErrsIn, ErrsOut) :-
     atomic_list_concat(['Error sintáctico: Se esperaba "{" después de la firma de int main(void).'], Msg),
     parse_programa(RestoFirma, FunsIn, FunsOut, [Msg | ErrsIn], ErrsOut, true).
+
+skip_bloque_con_llaves([], []).
+skip_bloque_con_llaves(['{' - _ | T], Resto) :- !, skip_hasta_cierre_con_nivel(T, 1, Resto).
+skip_bloque_con_llaves([_ | T], Resto) :- skip_bloque_con_llaves(T, Resto).
+
+skip_hasta_cierre_con_nivel([], _, []).
+skip_hasta_cierre_con_nivel(['{' - _ | T], Nivel, Resto) :- !, Nivel1 is Nivel + 1, skip_hasta_cierre_con_nivel(T, Nivel1, Resto).
+skip_hasta_cierre_con_nivel(['}' - _ | T], 1, T) :- !.
+skip_hasta_cierre_con_nivel(['}' - _ | T], Nivel, Resto) :- !, Nivel1 is Nivel - 1, skip_hasta_cierre_con_nivel(T, Nivel1, Resto).
+skip_hasta_cierre_con_nivel([_ | T], Nivel, Resto) :- skip_hasta_cierre_con_nivel(T, Nivel, Resto).
  
 % ------------------------------------------------------------
 % RECOLECCIÓN DE VARIABLES GLOBAL
@@ -499,7 +537,7 @@ recolectar_vars([Tipo - _ , Nombre - identificador , '=' - _ | R0],
     skip_semi(R0, R1),
     Pos1 is Pos + 1,
     recolectar_vars(R1, Syms, Pos1).
-recolectar_vars([_ | R], Syms, Pos) :- recolectar_vars(R, Syms, Pos).
+recolectar_vars([_ | R], Syms, Pos) :- !, recolectar_vars(R, Syms, Pos).
 
 skip_semi([';' - _ | S], S) :- !.
 skip_semi([_ | E], S) :- skip_semi(E, S).
