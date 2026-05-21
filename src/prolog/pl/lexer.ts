@@ -364,7 +364,7 @@ parse_stmts(E, S) :-
     parse_stmts(Mid, S).
  
 % ------------------------------------------------------------
-% SENTENCIA
+% SENTENCIAS
 % ------------------------------------------------------------
 parse_stmt([_ - identificador , '=' - _ | E], S) :-
     !, parse_expr(E, [';' - _ | S]).
@@ -372,18 +372,28 @@ parse_stmt([_ - identificador , '++' - _ , ';' - _ | S], S) :- !.
 parse_stmt([_ - identificador , '--' - _ , ';' - _ | S], S) :- !.
 parse_stmt(['++' - _ , _ - identificador , ';' - _ | S], S) :- !.
 parse_stmt(['--' - _ , _ - identificador , ';' - _ | S], S) :- !.
+parse_stmt([_ - identificador, OpComp - _ | E], S) :-
+    atom(OpComp), atom_concat(_, '=', OpComp), !,
+    parse_expr(E, [';' - _ | S]).
 parse_stmt([return - _ , ';' - _ | S], S) :- !.
 parse_stmt([return - _ | E], S) :- !, parse_expr(E, [';' - _ | S]).
+parse_stmt([std - _, '::' - _, cout - _, '<<' - _ | E], S) :- !,
+    parse_ostream_cola(E, [';' - _ | S]).
+parse_stmt([std - _, '::' - _, cin - _, '>>' - _, _ - identificador, ';' - _ | S], S) :- !.
+
 parse_stmt([if    - _ | E], S) :- !, parse_if(E, S).
 parse_stmt([while - _ | E], S) :- !, parse_while(E, S).
 parse_stmt([do    - _ | E], S) :- !, parse_do(E, S).
 parse_stmt([for   - _ | E], S) :- !, parse_for(E, S).
-parse_stmt([_ | E], S) :- skip_semi(E, S).
- 
-skip_semi([';' - _ | S], S) :- !.
-skip_semi([_ | E], S) :- skip_semi(E, S).
-skip_semi([], []).
- 
+
+parse_ostream_cola(E, S) :-
+    parse_expr(E, Mid),
+    parse_ostream_resto(Mid, S).
+
+parse_ostream_resto(['<<' - _ | E], S) :- !,
+    parse_ostream_cola(E, S).
+parse_ostream_resto(S, S).
+
 % ------------------------------------------------------------
 % ESTRUCTURAS DE CONTROL
 % ------------------------------------------------------------
@@ -409,13 +419,15 @@ parse_for(['(' - _ | E], S) :-
     parse_expr(Mid1, [';' - _ | Mid2]),
     parse_update(Mid2, [')' - _ | Mid3]),
     parse_bloque(Mid3, S, _).
- 
+
 parse_update([_ - identificador , '++' - _ | S], S) :- !.
 parse_update([_ - identificador , '--' - _ | S], S) :- !.
 parse_update(['++' - _ , _ - identificador | S], S) :- !.
 parse_update(['--' - _ , _ - identificador | S], S) :- !.
 parse_update([_ - identificador , '=' - _ | E], S) :- !, parse_expr(E, S).
-parse_update([_ | E], S) :- parse_update(E, S).
+parse_update([_ - identificador, OpComp - _ | E], S) :-
+    atom(OpComp), atom_concat(_, '=', OpComp), !,
+    parse_expr(E, S).
  
 % ------------------------------------------------------------
 % DEFINICIÓN DE FUNCIÓN
@@ -482,6 +494,10 @@ recolectar_vars([Tipo - _ , Nombre - identificador , '=' - _ | R0],
     recolectar_vars(R1, Syms, Pos1).
 recolectar_vars([_ | R], Syms, Pos) :- recolectar_vars(R, Syms, Pos).
 
+skip_semi([';' - _ | S], S) :- !.
+skip_semi([_ | E], S) :- skip_semi(E, S).
+skip_semi([], []).
+
 % ------------------------------------------------------------
 % VALIDACIÓN DE BALANCEO DE LLAVES Y PARÉNTESIS
 % ------------------------------------------------------------
@@ -525,14 +541,10 @@ analizar(Codigo, Simbolos, Errores) :-
     tokenize(Codigo, RawTokens),
     token(RawTokens, Tokens),
     errores_lexicos(Tokens, ErrLex),
- 
-    parse_programa(Tokens, [], FunSyms, [], ErrSinRaw, TieneMain),
-    comprobar_error_main(TieneMain, ErrSinRaw, ErrSin),
-    recolectar_vars(Tokens, VarSyms, 0),
 
     (   verificar_balanceo(Tokens, ErrBalanceo) ->
         Simbolos = [],
-        append(ErrLex, [ErrBalanceo], Errores)
+        Errores = [ErrBalanceo]
     ;   
         parse_programa(Tokens, [], FunSyms, [], ErrSinRaw, TieneMain),
         comprobar_error_main(TieneMain, ErrSinRaw, ErrSin),
