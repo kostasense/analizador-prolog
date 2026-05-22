@@ -78,7 +78,9 @@ identifier_start(95).                            % underscore _
 identifier_content(Code):- is_alnum(Code).       % a-z, A-Z, 0-9
 identifier_content(95).  
 
-% -------------------------------------------- helpers --------------------------------------------
+% ------------------------------------------------------------
+% HELPERS
+% ------------------------------------------------------------
 %   check if given code belongs to a digit
 is_digit(D):- D >= 48, D =< 57.
 
@@ -100,102 +102,118 @@ skip_to_close(['}' - _ | T], T):- !.
 skip_to_close([_ | T], R) :- 
     skip_to_close(T, R).
 
-% -------------------------------------------- tokenizer --------------------------------------------
+%   new_line
+%   sets new line of tokens
+new_line:-
+    line(Line),
+    NewLine is Line + 1,
+    retractall(line(_)),
+    asserta(line(NewLine)).
+
+% ------------------------------------------------------------
+% TOKENIZER
+% ------------------------------------------------------------
 %!  tokenize(+String, -Tokens)
 %   convert a string into a list of tokens.
 tokenize(String, Tokens):-
+    retractall(line(_)),
+    asserta(line(1)),
+
     atom_codes(String, Codes),
     atoms(Codes, Tokens).
 
 %!  token(+Tokens, -Token-Type) 
 token([], []).
 
-token([Token | Rest], [Token-Type | Remaining]):-
+token([Line-Token | Rest], [Line-Token-Type | Remaining]):-
     type(Token, Type), !,
     token(Rest, Remaining).
 
 token([Token | Rest], [Token-error | Remaining]):-
     token(Rest, Remaining).
 
-% -------------------------------------------- atoms --------------------------------------------
+
+% ------------------------------------------------------------
+% ATOMS
+% ------------------------------------------------------------
 %!  atoms(+CharacterCodes, -Atoms)
 atoms([], []).
 
 %   skip whitespace (space, tab, newline, carriage-return)
 atoms([32 | Rest], Atoms):- !, atoms(Rest, Atoms).   % space
-atoms([9  | Rest], Atoms):- !, atoms(Rest, Atoms).   % \t
+atoms([9  | Rest], Atoms):- !, new_line, atoms(Rest, Atoms).   % \t
 atoms([10 | Rest], Atoms):- !, atoms(Rest, Atoms).   % \n
 atoms([13 | Rest], Atoms):- !, atoms(Rest, Atoms).   % \r
 
 %   string literals
-atoms([34 | RestCodes], [Atom | RestAtoms]):-
+atoms([34 | RestCodes], [Atom-Line | RestAtoms]):-
     !,
+    line(Line),
     build_string(RestCodes, StringCodes, RemainingCodes),
     atom_codes(Atom, [34 | StringCodes]),
     atoms(RemainingCodes, RestAtoms).
 
 %   two-character operators
-atoms([38,  38  | Rest], ['&&' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([124, 124 | Rest], ['||' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([61,  61  | Rest], ['==' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([33,  61  | Rest], ['!=' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([60,  61  | Rest], ['<=' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([62,  61  | Rest], ['>=' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([62,  62  | Rest], ['>>' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([60,  60  | Rest], ['<<' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([43,  43  | Rest], ['++' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([45,  45  | Rest], ['--' | RestAtoms]):- !, atoms(Rest, RestAtoms).
+atoms([38,  38  | Rest], [Line-'&&' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([124, 124 | Rest], [Line-'||' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([61,  61  | Rest], [Line-'==' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([33,  61  | Rest], [Line-'!=' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([60,  61  | Rest], [Line-'<=' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([62,  61  | Rest], [Line-'>=' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([62,  62  | Rest], [Line-'>>' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([60,  60  | Rest], [Line-'<<' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([43,  43  | Rest], [Line-'++' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([45,  45  | Rest], [Line-'--' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
 
 %   single-character operators and punctuation
-atoms([38  | Rest], ['&' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([124 | Rest], ['|' | RestAtoms]):- !, atoms(Rest, RestAtoms).
-atoms([40  | Rest], ['(' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % (
-atoms([41  | Rest], [')' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % )
-atoms([123 | Rest], ['{' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % {
-atoms([125 | Rest], ['}' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % }
-atoms([91  | Rest], ['[' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % [
-atoms([93  | Rest], [']' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % ]
-atoms([59  | Rest], [';' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % ;
-atoms([44  | Rest], [',' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % ,
-atoms([43  | Rest], ['+' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % +
-atoms([45  | Rest], ['-' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % -
-atoms([42  | Rest], ['*' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % *
-atoms([47  | Rest], ['/' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % /
-atoms([37  | Rest], ['%' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % %
-atoms([33  | Rest], ['!' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % !
-atoms([61  | Rest], ['=' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % =
-atoms([60  | Rest], ['<' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % <
-atoms([62  | Rest], ['>' | RestAtoms]):- !, atoms(Rest, RestAtoms).   % >
+atoms([38  | Rest], [Line-'&' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([124 | Rest], [Line-'|' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).
+atoms([40  | Rest], [Line-'(' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % (
+atoms([41  | Rest], [Line-')' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % )
+atoms([123 | Rest], [Line-'{' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % {
+atoms([125 | Rest], [Line-'}' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % }
+atoms([91  | Rest], [Line-'[' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % [
+atoms([93  | Rest], [Line-']' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % ]
+atoms([59  | Rest], [Line-';' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % ;
+atoms([44  | Rest], [Line-',' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % ,
+atoms([43  | Rest], [Line-'+' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % +
+atoms([45  | Rest], [Line-'-' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % -
+atoms([42  | Rest], [Line-'*' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % *
+atoms([47  | Rest], [Line-'/' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % /
+atoms([37  | Rest], [Line-'%' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % %
+atoms([33  | Rest], [Line-'!' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % !
+atoms([61  | Rest], [Line-'=' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % =
+atoms([60  | Rest], [Line-'<' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % <
+atoms([62  | Rest], [Line-'>' | RestAtoms]):- !, line(Line), atoms(Rest, RestAtoms).   % >
 
 %   skip empty word
 atoms(Codes, RestAtoms):-
     build(Codes, WordCodes, RemainingCodes),
     WordCodes = [],
     !,
-    write('>> skip empty word: '), write(Codes), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %   float literal
-atoms(Codes, [Atom | RestAtoms]):-
+atoms(Codes, [Line-Atom | RestAtoms]):-
+    line(Line),
     build(Codes, FloatCodes, RemainingCodes),
     build_float(Atom, FloatCodes),
     !,
-    write('>> float literal: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %   integer literal
-atoms(Codes, [Atom | RestAtoms]):-
+atoms(Codes, [Line-Atom | RestAtoms]):-
+    line(Line),
     build(Codes, IntegerCodes, RemainingCodes),
     build_integer(Atom, IntegerCodes),
     !,
-    write('>> integer literal: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %   generic word
-atoms(Codes, [Atom | RestAtoms]):-
+atoms(Codes, [Line-Atom | RestAtoms]):-
+    line(Line),
     build(Codes, WordCodes, RemainingCodes),
     atom_codes(Atom, WordCodes),
-    write('>> generic word: '), write(Atom), nl,
     atoms(RemainingCodes, RestAtoms).
 
 %!  special_char(+Code)
@@ -221,7 +239,16 @@ special_char(42).   % *
 special_char(47).   % /
 special_char(37).   % %
 
-% -------------------------------------------- builders --------------------------------------------
+% ------------------------------------------------------------
+% BUILDERS
+% ------------------------------------------------------------
+%!  build_string(+InputCodes, -WordCodes, -Remainder)
+%   collect codes inside a string literal until the closing quotes
+build_string([34 | T], [34], T):- !.
+build_string([], [], []).
+build_string([H | T], [H | WordTail], Remainder):-
+    build_string(T, WordTail, Remainder).
+
 %!  build(+InputCodes, -WordCodes, -Remainder)
 %   collect alphanumeric/underscore codes into a word.
 %   stops at whitespace (consuming it) or a special char (leaving it).
@@ -230,13 +257,6 @@ build([9  | T], [], T):- !.    % tab
 build([10 | T], [], T):- !.    % newline    
 build([13 | T], [], T):- !.    % cr     
 build([], [], []).
-
-%!  build_string(+InputCodes, -WordCodes, -Remainder)
-%   collect codes inside a string literal until the closing quotes
-build_string([34 | T], [34], T):- !.
-build_string([], [], []).
-build_string([H | T], [H | WordTail], Remainder):-
-    build_string(T, WordTail, Remainder).
 
 build([H | T], [], [H | T]):-  % special char
     special_char(H), !.
@@ -598,4 +618,5 @@ analizar(Codigo, Simbolos, Errores) :-
         append(ErrLex, ErrSin, Errores),
         append(FunSyms, VarSyms, Simbolos)
     ).
+
 `;
