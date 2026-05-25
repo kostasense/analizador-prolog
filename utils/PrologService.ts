@@ -1,65 +1,111 @@
 import { prologEngine } from "../src/prolog/PrologEngine";
 
+export interface Lexeme {
+  lexema: string;
+  componente: string;
+}
+
+export interface SymbolRow {
+  nombre: string;
+  categoria: string;
+  tipo: string;
+  valor: string;
+  parametros: string;
+  posicion: number;
+}
+
+export interface AnalysisResult {
+  lexemes: Lexeme[];
+  symbols: SymbolRow[];
+  errors: string[];
+}
+
 const query = (goal: string) => prologEngine.queryAll(goal, false);
-const queryAll = (goal: string) => prologEngine.queryAll(goal, true);
-const prove = (goal: string) => prologEngine.prove(goal);
-const assert = (fact: string) => prologEngine.assert(fact);
-const retract = (fact: string) => prologEngine.retract(fact);
 
 export class PrologService {
-  async getTokensResults(code: string) {
-    const safe = this.escapeCode(code);
-    console.log(safe);
+  private unwrap(term: any): string {
+    if (term === null || term === undefined) return "";
 
+    if (typeof term === "string") return term;
+    if (typeof term === "number") return String(term);
+
+    if (
+      term.functor === "-" &&
+      Array.isArray(term.args) &&
+      term.args.length === 2
+    ) {
+      const arg1 = term.args[0];
+      const arg2 = term.args[1];
+
+      const val1 = this.unwrap(arg1);
+      const val2 = this.unwrap(arg2);
+
+      if (typeof arg1 === "string" && typeof arg2 === "number") return val1;
+      if (typeof arg2 === "string" && typeof arg1 === "number") return val2;
+
+      if (typeof arg1 === "number" && typeof arg2 === "number") return val2;
+
+      return val2 || val1;
+    }
+
+    if (term.id !== undefined) return String(term.id);
+    if (term.value !== undefined) return String(term.value);
+
+    return String(term);
+  }
+
+  // ─── ANÁLISIS LÉXICO ─────────────────────────────────────────────────────
+  async getLexicalAnalysis(code: string): Promise<AnalysisResult> {
+    const safe = this.escapeCode(code);
     const result = await query(
       `tokenize('${safe}', Tokens), token(Tokens, Clasificados).`,
     );
 
     console.log(result);
-    return result;
-  }
 
-  async analyzeCode(code: string): Promise<{
-    lexemes: { lexema: string; componente: string }[];
-    symbols: {
-      nombre: string;
-      categoria: string;
-      tipo: string;
-      valor: string;
-      parametros: string;
-      posicion: number;
-    }[];
-    errors: string[];
-  }> {
-    const safe = this.escapeCode(code);
+    const lexemes: Lexeme[] = [];
+    const symbols: SymbolRow[] = [];
+    const errors: string[] = [];
 
-    const lexResult = await query(
-      `tokenize('${safe}', Tokens), token(Tokens, Clasificados).`,
-    );
+    if (result && result.length > 0) {
+      let pos = 0;
+      for (const item of result[0].Clasificados ?? []) {
+        if (item && item.args && item.args.length === 2) {
+          // item.args[0] es el objeto compuesto del Token
+          // item.args[1] es el string del tipo ("palabra reservada", "identificador", etc.)
+          const token = this.unwrap(item.args[0]);
+          const type = this.unwrap(item.args[1]);
 
-    const lexemes: { lexema: string; componente: string }[] = [];
-    const lexErrors: string[] = [];
+          if (type === "error") {
+            errors.push(`Token desconocido: ${token}`);
+          } else {
+            lexemes.push({ lexema: token, componente: type });
 
-    if (lexResult && lexResult.length > 0) {
-      for (const item of lexResult[0].Clasificados ?? []) {
-        const tok = item.args[0];
-        const typ = item.args[1];
-        if (typ === "error") {
-          lexErrors.push(`Token desconocido: ${tok}`);
-        } else {
-          lexemes.push({ lexema: String(tok), componente: String(typ) });
+            if (type === "identificador") {
+              symbols.push({
+                nombre: token,
+                categoria: "variable",
+                tipo: "",
+                valor: "-",
+                parametros: "-",
+                posicion: pos++,
+              });
+            }
+          }
         }
       }
     }
 
-    let symbols: {
-      nombre: string;
-      categoria: string;
-      tipo: string;
-      valor: string;
-      parametros: string;
-      posicion: number;
-    }[] = [];
+    return { lexemes, symbols, errors };
+  }
+
+  // ─── ANÁLISIS COMPLETO (LÉXICO + SINTÁCTICO) ─────────────────────────────
+  async getFullAnalysis(code: string): Promise<AnalysisResult> {
+    const safe = this.escapeCode(code);
+
+    const { lexemes, errors: lexErrors } = await this.getLexicalAnalysis(code);
+
+    let symbols: SymbolRow[] = [];
     let synErrors: string[] = [];
 
     try {
@@ -69,37 +115,35 @@ export class PrologService {
         const rawSyms = synResult[0].Symbols ?? [];
         const rawErrs = synResult[0].Errors ?? [];
 
-        // Parse sym/6 terms
         for (const sym of rawSyms) {
           if (sym && sym.args) {
             symbols.push({
-              nombre: String(sym.args[0] ?? ""),
-              categoria: String(sym.args[1] ?? ""),
-              tipo: String(sym.args[2] ?? ""),
-              valor: String(sym.args[3] ?? "-"),
-              parametros: String(sym.args[4] ?? "-"),
-              posicion: Number(sym.args[5] ?? 0),
+              nombre: this.unwrap(sym.args[0]),
+              categoria: this.unwrap(sym.args[1]),
+              tipo: this.unwrap(sym.args[2]),
+              valor: this.unwrap(sym.args[3]) || "-",
+              parametros: this.unwrap(sym.args[4]) || "-",
+              posicion: Number(this.unwrap(sym.args[5]) ?? 0),
             });
           }
         }
 
-        // Errors are atoms
         for (const e of rawErrs) {
-          synErrors.push(typeof e === "string" ? e : String(e));
+          synErrors.push(this.unwrap(e));
         }
       }
     } catch (err) {
-      synErrors.push("Error al ejecutar el analizador sintáctico.");
+      synErrors.push("Error crítico al ejecutar el analizador sintáctico.");
       console.error(err);
     }
 
-    const errors = [...synErrors];
+    const allErrors = [...lexErrors, ...synErrors];
 
-    if (synErrors.length > 0) {
-      symbols = [];
-    }
-
-    return { lexemes, symbols, errors };
+    return {
+      symbols: synErrors.length > 0 ? [] : symbols,
+      lexemes,
+      errors: allErrors,
+    };
   }
 
   private escapeCode(code: string): string {

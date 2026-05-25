@@ -1,6 +1,6 @@
-import { PrologService } from "@/utils/PrologService";
+import { Lexeme, PrologService, SymbolRow } from "@/utils/PrologService";
 import * as DocumentPicker from "expo-document-picker";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Platform,
   ScrollView,
@@ -22,86 +22,71 @@ if (numero > x) {
     y = 10;
 }`;
 
-type Lexeme = { lexema: string; componente: string };
+const EDITOR_FONT_SIZE = 13;
+const EDITOR_LINE_HEIGHT = 20;
+const EDITOR_PADDING = 8;
+const FONT_MONO = Platform.OS === "ios" ? "Menlo" : "monospace";
+const FONT_UI = Platform.OS === "ios" ? "System" : "sans-serif";
 
-type Symbol = {
-  nombre: string;
-  categoria: "variable" | "funcion" | string;
-  tipo: string;
-  valor: string;
-  parametros: string;
-  posicion: number;
+const CHAR_WIDTH = EDITOR_FONT_SIZE * 0.601;
+
+//  A) junto a "TOKEN" (Línea N)          — errores en main/funciones
+//  B) junto a "TOKEN" en la línea N      — firma/estructura incorrecta
+//  C) ("TOKEN") en la línea N            — elemento global fuera de lugar
+//  D) Token desconocido: "TOKEN" en la línea N — error léxico
+//  E) (Línea N) sin token                — firma de función sin token claro
+//  F) en la línea N sin token            — balanceo de llaves
+//  G) sin número de línea                — falta int main(void), nada que marcar
+const getErrorInfo = (errors: string[]) => {
+  if (!errors?.length) return null;
+
+  const err = errors[errors.length - 1];
+
+  let lineMatch = err.match(/\(L[íi]nea\s+(\d+)\)/i);
+  if (!lineMatch) lineMatch = err.match(/en\s+la\s+l[íi]nea\s+(\d+)/i);
+  if (!lineMatch) return null;
+
+  const line = parseInt(lineMatch[1], 10);
+
+  let tokenMatch = err.match(/junto\s+a\s+"([^"]+)"/i);
+  if (!tokenMatch) tokenMatch = err.match(/\("([^"]+)"\)/);
+  if (!tokenMatch) tokenMatch = err.match(/desconocido:\s*"([^"]+)"/i);
+  if (!tokenMatch) tokenMatch = err.match(/cerca\s+de\s+"([^"]+)"/i);
+
+  return {
+    line,
+    token: tokenMatch?.[1] ?? null,
+  };
 };
-
-type LexError = { message: string };
 
 export default function Index() {
   const [code, setCode] = useState(INITIAL_CODE);
   const [lexemes, setLexemes] = useState<Lexeme[]>([]);
-  const [symbols, setSymbols] = useState<Symbol[]>([]);
-  const [errors, setErrors] = useState<LexError[]>([]);
+  const [symbols, setSymbols] = useState<SymbolRow[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"lexico" | "sintactico">("lexico");
+  const textInputRef = useRef<TextInput>(null);
 
-  // ── Lexical-only analysis (original behaviour) ──────────────────────────
-  const handleLexicalAnalysis = async () => {
+  const handleAnalysis = async () => {
     setLoading(true);
+    try {
+      const {
+        lexemes: lex,
+        symbols: syms,
+        errors: errs,
+      } = mode === "lexico"
+        ? await prologService.getLexicalAnalysis(code)
+        : await prologService.getFullAnalysis(code);
 
-    const foundLexemes: Lexeme[] = [];
-    const foundSymbols: Symbol[] = [];
-    const foundErrors: LexError[] = [];
-
-    const results = await prologService.getTokensResults(code);
-
-    let pos = 0;
-    for (let cont = 0; cont < results[0].Clasificados.length; cont++) {
-      const type = results[0].Clasificados[cont].args[1];
-      const token = results[0].Clasificados[cont].args[0];
-
-      if (type === "identificador") {
-        foundSymbols.push({
-          nombre: String(token),
-          categoria: "variable",
-          tipo: "",
-          valor: "-",
-          parametros: "-",
-          posicion: pos++,
-        });
-      }
-
-      if (type === "error") {
-        foundErrors.push({ message: String(token) });
-      } else {
-        foundLexemes.push({ lexema: String(token), componente: String(type) });
-      }
-    }
-
-    setErrors(foundErrors);
-    setLexemes(foundLexemes);
-    setSymbols(foundSymbols);
-    setLoading(false);
-  };
-
-  const handleSyntacticAnalysis = async () => {
-    setLoading(true);
-
-    const {
-      lexemes: lex,
-      symbols: syms,
-      errors: errs,
-    } = await prologService.analyzeCode(code);
-
-    setLexemes(lex);
-    setSymbols(syms);
-    setErrors(errs.map((e) => ({ message: e })));
-    setLoading(false);
-  };
-
-  const handleAnalysis = () => {
-    if (mode === "lexico") {
-      handleLexicalAnalysis();
-    } else {
-      handleSyntacticAnalysis();
+      setLexemes(lex);
+      setSymbols(syms);
+      setErrors(errs);
+    } catch (err) {
+      setErrors(["Error de comunicación con el motor de análisis."]);
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -119,7 +104,9 @@ export default function Index() {
     setCode(content);
   };
 
-  const isFuncion = (s: Symbol) => s.categoria === "funcion";
+  const errorInfo = getErrorInfo(errors);
+  const lines = code.split("\n");
+  const isFuncion = (s: SymbolRow) => s.categoria === "funcion";
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -165,28 +152,125 @@ export default function Index() {
           </TouchableOpacity>
         </View>
 
-        {/* Top row */}
+        {/* Top row: Editor & Errors */}
         <View style={styles.row}>
-          {/* Code Editor */}
-          <View style={[styles.card, styles.flex2]}>
-            <Text style={styles.cardTitle}>
+          <View style={[styles.card, styles.flex2, styles.editorCardFix]}>
+            <Text style={styles.cardTitleInternal}>
               Editor de Código (Zona de Entrada)
             </Text>
-            <TextInput
-              style={styles.codeInput}
-              multiline
-              value={code}
-              onChangeText={setCode}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              textAlignVertical="top"
-              placeholderTextColor="#888"
-              placeholder="Escribe o pega tu código aquí..."
-            />
+
+            <ScrollView
+              style={styles.innerEditorScroll}
+              contentContainerStyle={styles.innerEditorContent}
+            >
+              <View style={styles.editorFlexRow}>
+                <View style={styles.gutterContainer}>
+                  {lines.map((_, i) => {
+                    const isErrorLine = errorInfo && errorInfo.line === i + 1;
+                    return (
+                      <Text
+                        key={i}
+                        style={[
+                          styles.gutterText,
+                          isErrorLine && styles.gutterTextError,
+                        ]}
+                      >
+                        {i + 1}
+                      </Text>
+                    );
+                  })}
+                </View>
+
+                {/* Contenedor interactivo que abarca todo el espacio disponible */}
+                <TouchableOpacity
+                  style={styles.textareaWorkspace}
+                  activeOpacity={1}
+                  onPress={() => textInputRef.current?.focus()}
+                >
+                  {errorInfo &&
+                    (() => {
+                      const errorLineIndex = errorInfo.line - 1;
+                      const lineText = lines[errorLineIndex] ?? "";
+                      const TAB_WIDTH = 4;
+
+                      const topOffset =
+                        EDITOR_PADDING +
+                        errorLineIndex * EDITOR_LINE_HEIGHT +
+                        EDITOR_LINE_HEIGHT -
+                        2;
+
+                      let leftOffset: number;
+                      let underlineWidth: number;
+
+                      if (errorInfo.token) {
+                        const tokenIndex = lineText.indexOf(errorInfo.token);
+                        if (tokenIndex === -1) return null;
+
+                        const textBefore = lineText.substring(0, tokenIndex);
+                        const tabs = (textBefore.match(/\t/g) || []).length;
+                        const visualBefore =
+                          textBefore.length - tabs + tabs * TAB_WIDTH;
+
+                        leftOffset = EDITOR_PADDING + visualBefore * CHAR_WIDTH;
+                        underlineWidth = errorInfo.token.length * CHAR_WIDTH;
+                      } else {
+                        const trimmedStart = lineText.search(/\S/);
+                        if (trimmedStart === -1) return null;
+
+                        const textBefore = lineText.substring(0, trimmedStart);
+                        const tabs = (textBefore.match(/\t/g) || []).length;
+                        const visualBefore =
+                          textBefore.length - tabs + tabs * TAB_WIDTH;
+
+                        const trimmedText = lineText.trimEnd();
+                        const tabsInLine = (trimmedText.match(/\t/g) || [])
+                          .length;
+                        const visualWidth =
+                          trimmedText.length -
+                          tabsInLine +
+                          tabsInLine * TAB_WIDTH -
+                          visualBefore;
+
+                        leftOffset = EDITOR_PADDING + visualBefore * CHAR_WIDTH;
+                        underlineWidth = visualWidth * CHAR_WIDTH;
+                      }
+
+                      return (
+                        <View
+                          pointerEvents="none"
+                          style={[
+                            styles.tokenUnderline,
+                            {
+                              top: topOffset,
+                              left: leftOffset,
+                              width: underlineWidth,
+                            },
+                          ]}
+                        />
+                      );
+                    })()}
+
+                  <TextInput
+                    ref={textInputRef}
+                    style={styles.codeInput}
+                    multiline={true}
+                    scrollEnabled={false}
+                    value={code}
+                    onChangeText={setCode}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
+                    textAlignVertical="top"
+                    placeholderTextColor="#888"
+                    placeholder="Escribe o pega tu código aquí..."
+                    selectionColor="#4a90d9"
+                  />
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
 
-          {/* Errors */}
+          {/* Panel de errores */}
           <View style={[styles.card, styles.flex1]}>
             <Text style={styles.cardTitle}>
               {mode === "lexico"
@@ -197,10 +281,10 @@ export default function Index() {
               {errors.length === 0 ? (
                 <Text style={styles.emptyText}>Sin errores</Text>
               ) : (
-                errors.map((e, i) => (
+                errors.map((errorMsg, i) => (
                   <View key={i} style={styles.errorRow}>
                     <Text style={styles.errorDot}>●</Text>
-                    <Text style={styles.errorText}>{e.message}</Text>
+                    <Text style={styles.errorText}>{errorMsg}</Text>
                   </View>
                 ))
               )}
@@ -208,9 +292,9 @@ export default function Index() {
           </View>
         </View>
 
-        {/* Bottom row */}
+        {/* Bottom row: Lexemes & Symbols Tables */}
         <View style={styles.row}>
-          {/* Lexemes Table */}
+          {/* Tabla de lexemas */}
           <View style={[styles.card, styles.flex1]}>
             <Text style={styles.cardTitle}>
               Zona de Lexemas y Componentes Léxicos
@@ -253,10 +337,9 @@ export default function Index() {
             </ScrollView>
           </View>
 
-          {/* Symbols Table — unified for variables and functions */}
+          {/* Tabla de símbolos */}
           <View style={[styles.card, styles.flex1]}>
             <Text style={styles.cardTitle}>Tabla de Símbolos</Text>
-
             <View style={styles.tableHeader}>
               <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>
                 Nombre
@@ -269,7 +352,6 @@ export default function Index() {
               </Text>
               <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Pos.</Text>
             </View>
-
             <ScrollView style={styles.tableScroll}>
               {symbols.length === 0 ? (
                 <Text style={styles.emptyText}>Sin símbolos</Text>
@@ -335,7 +417,7 @@ export default function Index() {
           </View>
         </View>
 
-        {/* Action Buttons */}
+        {/* Botones de acción */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={styles.button}
@@ -365,9 +447,6 @@ export default function Index() {
   );
 }
 
-const FONT_MONO = Platform.OS === "ios" ? "Menlo" : "monospace";
-const FONT_UI = Platform.OS === "ios" ? "System" : "sans-serif";
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f0f0f0" },
   container: { padding: 12, gap: 10 },
@@ -390,7 +469,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Mode toggle
   modeRow: {
     flexDirection: "row",
     gap: 8,
@@ -427,6 +505,10 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
+  editorCardFix: {
+    padding: 0,
+    overflow: "hidden",
+  },
   cardTitle: {
     fontSize: 12,
     fontWeight: "600",
@@ -435,21 +517,79 @@ const styles = StyleSheet.create({
     fontFamily: FONT_UI,
     letterSpacing: 0.1,
   },
+  cardTitleInternal: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#333",
+    paddingTop: 10,
+    paddingHorizontal: 10,
+    marginBottom: 4,
+    fontFamily: FONT_UI,
+  },
   flex1: { flex: 1 },
   flex2: { flex: 2 },
 
-  codeInput: {
+  innerEditorScroll: {
     flex: 1,
-    minHeight: 150,
-    fontFamily: FONT_MONO,
-    fontSize: 13,
-    color: "#1a1a1a",
-    lineHeight: 20,
     backgroundColor: "#fafafa",
-    borderRadius: 6,
-    borderWidth: 1,
+  },
+  innerEditorContent: {
+    flexGrow: 1,
+  },
+  editorFlexRow: {
+    flexDirection: "row",
+    flex: 1,
+    minHeight: 155,
+  },
+
+  gutterContainer: {
+    width: 32,
+    backgroundColor: "#f0f0f0",
+    borderRightWidth: 1,
     borderColor: "#e0e0e0",
-    padding: 8,
+    paddingTop: EDITOR_PADDING,
+    alignItems: "flex-end",
+    paddingRight: 6,
+  },
+  gutterText: {
+    fontFamily: FONT_MONO,
+    fontSize: EDITOR_FONT_SIZE,
+    lineHeight: EDITOR_LINE_HEIGHT,
+    color: "#a0a0a0",
+    textAlign: "right",
+    includeFontPadding: false,
+  },
+  gutterTextError: {
+    color: "#e53e3e",
+    fontWeight: "bold",
+  },
+
+  textareaWorkspace: {
+    flex: 1,
+    position: "relative",
+  },
+
+  tokenUnderline: {
+    position: "absolute",
+    height: 2,
+    backgroundColor: "#e53e3e",
+    borderRadius: 1,
+  },
+
+  codeInput: {
+    // Fija el input perfectamente a las 4 esquinas de 'textareaWorkspace'
+    ...StyleSheet.absoluteFillObject,
+    // Elimina scrollbars redundantes u ocultas del textarea nativo
+    overflow: "hidden",
+    fontFamily: FONT_MONO,
+    fontSize: EDITOR_FONT_SIZE,
+    lineHeight: EDITOR_LINE_HEIGHT,
+    paddingTop: EDITOR_PADDING,
+    paddingBottom: EDITOR_PADDING,
+    paddingHorizontal: EDITOR_PADDING,
+    color: "#1a1a1a",
+    backgroundColor: "transparent",
+    includeFontPadding: false,
   },
 
   errorScroll: { flex: 1 },
@@ -495,7 +635,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f0f0f0",
   },
   tableRowEven: { backgroundColor: "#f9f9f9" },
-  tableRowFun: { backgroundColor: "#eef4ff" }, // light blue tint for functions
+  tableRowFun: { backgroundColor: "#eef4ff" },
   tableCell: {
     fontSize: 12,
     color: "#222",
